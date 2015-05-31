@@ -326,6 +326,7 @@ func storeMultiset(ctx context.Context, dag merkledag.DAGService, refcounts map[
 		// We use range here to pick an arbitrary item in the map, but
 		// not really iterate the map.
 		for k, refs := range refcounts {
+			// Max value a single multiset item can store
 			num := ^refcount(0)
 			if refs <= uint64(num) {
 				// Remaining count fits in a single item; remove the
