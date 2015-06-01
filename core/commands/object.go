@@ -446,12 +446,13 @@ resulting object hash.
 			return
 		}
 
-		ctx, _ := context.WithTimeout(req.Context().Context, time.Second*30)
+		ctx, cancel := context.WithTimeout(req.Context().Context, time.Second*30)
 		rnode, err := nd.DAG.Get(ctx, rhash)
 		if err != nil {
 			res.SetError(err, cmds.ErrNormal)
 			return
 		}
+		cancel()
 
 		switch req.Arguments()[1] {
 		case "add-link":
@@ -467,12 +468,13 @@ resulting object hash.
 			}
 
 			k := u.Key(hchild)
-			ctx, _ := context.WithTimeout(req.Context().Context, time.Second*30)
+			ctx, cancel := context.WithTimeout(req.Context().Context, time.Second*30)
 			childnd, err := nd.DAG.Get(ctx, k)
 			if err != nil {
 				res.SetError(err, cmds.ErrNormal)
 				return
 			}
+			cancel()
 
 			err = rnode.AddNodeLinkClean(req.Arguments()[2], childnd)
 			if err != nil {
