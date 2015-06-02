@@ -55,6 +55,7 @@ ipfs object data <key>      - Outputs raw bytes in an object
 ipfs object links <key>     - Outputs links pointed to by object
 ipfs object stat <key>      - Outputs statistics of object
 ipfs object new <template>  - Create new ipfs objects
+ipfs object patch <args>    - Create new object from old ones
 `,
 	},
 
@@ -380,8 +381,9 @@ node.
 
 		node := new(dag.Node)
 		if len(req.Arguments()) == 1 {
+			template := req.Arguments()[0]
 			var err error
-			node, err = nodeFromTemplate(req.Arguments()[0])
+			node, err = nodeFromTemplate(template)
 			if err != nil {
 				res.SetError(err, cmds.ErrNormal)
 				return
@@ -409,18 +411,19 @@ var objectPatchCmd = &cmds.Command{
 		Tagline: "Create a new merkledag object based on an existing one",
 		ShortDescription: `
 'ipfs patch <root> [add-link|rm-link] <args>' is a plumbing command used to
-build custom DAG objects.
+build custom DAG objects. It adds and removes links from objects, creating a new
+object as a result. This is the merkle-dag version of modifying an object.
 
 Examples:
 
-	EMPTY_DIR=QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn
-	BAR=$(echo "bar" | ipfs add -q)
+    EMPTY_DIR=$(ipfs object new unixfs-dir)
+    BAR=$(echo "bar" | ipfs add -q)
     ipfs patch $EMPTY_DIR add-link foo $BAR
 
 This takes an empty directory, and adds a link named foo under it, pointing to
 a file containing 'bar', and returns the hash of the new object.
 
-	ipfs patch $FOO_BAR rm-link foo
+    ipfs patch $FOO_BAR rm-link foo
 
 This removes the link named foo from the hash in $FOO_BAR and returns the
 resulting object hash.
@@ -454,35 +457,19 @@ resulting object hash.
 		}
 		cancel()
 
-		switch req.Arguments()[1] {
+		action := req.Arguments()[1]
+
+		switch action {
 		case "add-link":
 			if len(req.Arguments()) < 4 {
 				res.SetError(fmt.Errorf("not enough arguments for add-link"), cmds.ErrClient)
 				return
 			}
 
-			hchild, err := mh.FromB58String(req.Arguments()[3])
-			if err != nil {
-				res.SetError(err, cmds.ErrNormal)
-				return
-			}
+			name := req.Arguments()[2]
+			childk := u.B58KeyDecode(req.Arguments()[3])
 
-			k := u.Key(hchild)
-			ctx, cancel := context.WithTimeout(req.Context().Context, time.Second*30)
-			childnd, err := nd.DAG.Get(ctx, k)
-			if err != nil {
-				res.SetError(err, cmds.ErrNormal)
-				return
-			}
-			cancel()
-
-			err = rnode.AddNodeLinkClean(req.Arguments()[2], childnd)
-			if err != nil {
-				res.SetError(err, cmds.ErrNormal)
-				return
-			}
-
-			newkey, err := nd.DAG.Add(rnode)
+			newkey, err := addLink(req.Context().Context, nd.DAG, rnode, name, childk)
 			if err != nil {
 				res.SetError(err, cmds.ErrNormal)
 				return
@@ -498,7 +485,11 @@ resulting object hash.
 
 			name := req.Arguments()[2]
 
-			rnode.RemoveNodeLink(name)
+			err := rnode.RemoveNodeLink(name)
+			if err != nil {
+				res.SetError(err, cmds.ErrNormal)
+				return
+			}
 
 			newkey, err := nd.DAG.Add(rnode)
 			if err != nil {
@@ -522,6 +513,26 @@ resulting object hash.
 			return strings.NewReader(k.B58String() + "\n"), nil
 		},
 	},
+}
+
+func addLink(ctx context.Context, ds dag.DAGService, root *dag.Node, childname string, childk u.Key) (u.Key, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+	childnd, err := ds.Get(ctx, childk)
+	if err != nil {
+		return "", err
+	}
+	cancel()
+
+	err = root.AddNodeLinkClean(childname, childnd)
+	if err != nil {
+		return "", err
+	}
+
+	newkey, err := ds.Add(root)
+	if err != nil {
+		return "", err
+	}
+	return newkey, nil
 }
 
 func nodeFromTemplate(template string) (*dag.Node, error) {
